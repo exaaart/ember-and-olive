@@ -53,7 +53,7 @@ export default defineConfig({
       'react-dom/client',
       'three',
       'three/examples/jsm/utils/BufferGeometryUtils.js',
-      'three/examples/jsm/geometries/RoundedBoxGeometry.js',
+      'three/examples/jsm/lights/RectAreaLightUniformsLib.js',
       'three/examples/jsm/loaders/GLTFLoader.js',
       'three/examples/jsm/loaders/DRACOLoader.js',
       'three/examples/jsm/libs/meshopt_decoder.module.js',

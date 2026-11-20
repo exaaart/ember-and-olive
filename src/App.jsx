@@ -230,8 +230,8 @@ function DishStage({ onOpenDish }) {
       )}
       {state === 'fallback' && (
         <Photo
-          id="1504674900247-0877df9cc836"
-          alt="Утиная грудка с печёной свёклой на керамической тарелке"
+          id="1474979266404-7eaacbcd87c5"
+          alt="Маринованные оливки в оливковом масле"
           className="dish-fallback"
           sizes="(max-width: 960px) 100vw, 50vw"
           eager
@@ -239,12 +239,12 @@ function DishStage({ onOpenDish }) {
       )}
       <figcaption className="dish-caption">
         <button type="button" className="dish-caption-btn" onClick={onOpenDish}>
-          <span className="dish-caption-title">Утиная грудка с углей</span>
-          <span className="dish-caption-sub">Блюдо сезона: печёная свёкла, тыква, вишнёвый соус</span>
+          <span className="dish-caption-title">Оливки из Апулии и Крита</span>
+          <span className="dish-caption-sub">Ночеллара и каламата под стеклянным клошем в масле первого отжима</span>
         </button>
         {state === 'ready' && (
           <span className="dish-hint" aria-hidden="true">
-            {touch ? 'Потяните, чтобы повернуть' : 'Двигайте курсором или потяните тарелку'}
+            {touch ? 'Потяните, чтобы повернуть' : 'Двигайте курсором или потяните блюдо'}
           </span>
         )}
       </figcaption>
@@ -1181,7 +1181,7 @@ function Footer() {
         </div>
         <p className="footer-legal">
           © {new Date().getFullYear()} Ember &amp; Olive. Концепт-проект веб-студии: название, адрес и телефон
-          вымышлены. Фотографии — Unsplash.
+          вымышлены. Фотографии — Unsplash. 3D-модель — Wayfair / Khronos (CC BY 4.0).
         </p>
       </div>
     </footer>
@@ -1208,7 +1208,7 @@ export default function App() {
       </a>
       <Header />
       <main id="main">
-        <Hero onOpenDish={() => openDish(dishById('duck'))} />
+        <Hero onOpenDish={() => openDish(dishById('olives'))} />
         <Concept />
         <Signature onOpen={openDish} />
         <MenuSection onOpen={openDish} />

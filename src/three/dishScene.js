@@ -1,33 +1,50 @@
 import * as THREE from 'three'
 import dishModel from 'virtual:dish-model'
 import { buildProceduralDish } from './proceduralDish.js'
+import { computeCameraRig, computeModelNormalization } from './framing.js'
 import { mulberry32 } from './noise.js'
 
+const isSoftwareGl = (() => {
+  try {
+    const gl = document.createElement('canvas').getContext('webgl2')
+    if (!gl) return true
+    const ext = gl.getExtension('WEBGL_debug_renderer_info')
+    const param = ext ? ext.UNMASKED_RENDERER_WEBGL : gl.RENDERER
+    const gpu = String(gl.getParameter(param))
+    gl.getExtension('WEBGL_lose_context')?.loseContext()
+    return /SwiftShader|llvmpipe|softpipe|Software|Basic Render/i.test(gpu)
+  } catch {
+    return false
+  }
+})()
+
 /**
- * Интерактивная 3D-сцена «блюдо на керамической тарелке».
+ * Интерактивная 3D-сцена блюда в герое сайта.
  *
- * Если в /public/models/restaurant-dish.glb лежит модель — она загружается,
- * масштабируется под размер сцены и заменяет процедурное блюдо.
- * Если файла нет или он повреждён — остаётся процедурная версия, без ошибок в консоли.
+ * Если в /public/models/restaurant-dish.glb лежит модель — она загружается сразу,
+ * масштабируется под размер сцены и кадрируется с учётом высоты.
+ * Если файла нет или он повреждён — мягко показывается процедурное блюдо без ошибок в консоли.
  */
 export function createDishScene(container, { reducedMotion = false, onStatus = () => {} } = {}) {
   const isSmall = window.matchMedia('(max-width: 760px)').matches
 
   // ---------- renderer ----------
   const renderer = new THREE.WebGLRenderer({
-    antialias: true,
+    antialias: !isSoftwareGl,
     alpha: true,
     powerPreference: 'high-performance',
   })
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, isSmall ? 1.5 : 2))
+  renderer.setPixelRatio(
+    isSoftwareGl ? 1 : Math.min(window.devicePixelRatio || 1, isSmall ? 1.5 : 2),
+  )
   renderer.outputColorSpace = THREE.SRGBColorSpace
-  // Neutral бережнее к цветам еды, чем ACES: не выжигает оранжевый и розовый
-  renderer.toneMapping = THREE.NeutralToneMapping
-  renderer.toneMappingExposure = 1.0
-  renderer.shadowMap.enabled = true
-  renderer.shadowMap.type = THREE.PCFShadowMap
+  renderer.toneMapping = THREE.ACESFilmicToneMapping
+  renderer.toneMappingExposure = 1.02
+  renderer.shadowMap.enabled = !isSoftwareGl
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap
   renderer.domElement.className = 'dish-canvas'
   renderer.domElement.setAttribute('aria-hidden', 'true')
+  renderer.domElement.setAttribute('data-testid', 'dish-canvas')
   container.appendChild(renderer.domElement)
 
   const scene = new THREE.Scene()
@@ -36,56 +53,53 @@ export function createDishScene(container, { reducedMotion = false, onStatus = (
   const envTex = pmrem.fromScene(envScene, 0.02).texture
   disposeObject(envScene)
   scene.environment = envTex
-  scene.environmentIntensity = 0.85
+  scene.environmentIntensity = 1.48
 
   const camera = new THREE.PerspectiveCamera(24, 1, 0.1, 50)
-  const target = new THREE.Vector3(0, 0.1, 0)
+  const target = new THREE.Vector3(0, 0.5, 0)
 
-  // ---------- light ----------
-  scene.add(new THREE.HemisphereLight(0xffe2c2, 0x3a2414, 0.25))
+  // ---------- studio & restaurant lighting ----------
+  scene.add(new THREE.HemisphereLight(0xffe5c4, 0x2a180d, 0.38))
 
-  // мягкий тёплый заполняющий свет без теней — тени на глазури не уходят в серый
-  const fill = new THREE.DirectionalLight(0xffc89a, 0.45)
-  fill.position.set(-2.5, 3, 3.5)
+  const fill = new THREE.DirectionalLight(0xffcf9e, 0.58)
+  fill.position.set(-2.8, 3.2, 3.8)
   scene.add(fill)
 
-  const key = new THREE.DirectionalLight(0xffe4c8, 2.6)
-  key.position.set(1.6, 6.2, 1.8)
-  key.castShadow = true
+  const key = new THREE.DirectionalLight(0xffe4c6, 2.05)
+  key.position.set(2.2, 6.0, 2.6)
+  key.castShadow = !isSoftwareGl
   key.shadow.mapSize.set(isSmall ? 1024 : 2048, isSmall ? 1024 : 2048)
-  key.shadow.camera.left = -2.6
-  key.shadow.camera.right = 2.6
-  key.shadow.camera.top = 2.6
-  key.shadow.camera.bottom = -2.6
+  key.shadow.camera.left = -2.8
+  key.shadow.camera.right = 2.8
+  key.shadow.camera.top = 2.8
+  key.shadow.camera.bottom = -2.8
   key.shadow.camera.near = 1
   key.shadow.camera.far = 14
-  key.shadow.bias = -0.0004
+  key.shadow.bias = -0.0005
   key.shadow.normalBias = 0.02
-  key.shadow.radius = 8
-  key.shadow.blurSamples = 16
   scene.add(key)
 
-  const rim = new THREE.DirectionalLight(0xc8cf98, 1.3)
-  rim.position.set(-3.6, 2.4, -3.2)
+  const rim = new THREE.DirectionalLight(0xcbd694, 1.85)
+  rim.position.set(-3.8, 2.8, -3.4)
   scene.add(rim)
 
-  const ember = new THREE.PointLight(0xff5a1f, 3.5, 7, 2)
-  ember.position.set(2.1, 0.5, 1.4)
+  const ember = new THREE.PointLight(0xff5e22, 3.8, 8.5, 2)
+  ember.position.set(2.3, 0.65, 1.5)
   scene.add(ember)
 
   // ---------- ground: shadow + soft contact ----------
   const shadowGround = new THREE.Mesh(
     new THREE.PlaneGeometry(14, 14),
-    new THREE.ShadowMaterial({ opacity: 0.55 }),
+    new THREE.ShadowMaterial({ opacity: 0.48 }),
   )
   shadowGround.rotation.x = -Math.PI / 2
   shadowGround.receiveShadow = true
   scene.add(shadowGround)
 
   const contact = new THREE.Mesh(
-    new THREE.PlaneGeometry(4.6, 4.6),
+    new THREE.PlaneGeometry(4.4, 4.4),
     new THREE.MeshBasicMaterial({
-      map: radialTexture('rgba(0,0,0,0.75)', 'rgba(0,0,0,0)'),
+      map: radialTexture('rgba(0,0,0,0.72)', 'rgba(0,0,0,0)'),
       transparent: true,
       depthWrite: false,
     }),
@@ -95,19 +109,16 @@ export function createDishScene(container, { reducedMotion = false, onStatus = (
   scene.add(contact)
 
   // ---------- dish hierarchy ----------
-  const root = new THREE.Group() // наклон от курсора
-  const spin = new THREE.Group() // медленное вращение
+  const root = new THREE.Group() // наклон от курсора и вход
+  const spin = new THREE.Group() // медленное вращение и ручной поворот
   root.add(spin)
   scene.add(root)
 
-  let dish = buildProceduralDish({
-    quality: isSmall ? 'medium' : 'high',
-    anisotropy: Math.min(8, renderer.capabilities.getMaxAnisotropy()),
-  })
-  spin.add(dish)
+  let dish = null
+  const modelMetrics = { radius: 1.55, height: 1.95 }
 
   // ---------- embers ----------
-  const embers = reducedMotion ? null : buildEmbers(isSmall ? 18 : 34)
+  const embers = reducedMotion ? null : buildEmbers(isSmall ? 18 : 32)
   if (embers) scene.add(embers.points)
 
   // ---------- sizing ----------
@@ -116,13 +127,20 @@ export function createDishScene(container, { reducedMotion = false, onStatus = (
     const h = Math.max(1, container.clientHeight)
     renderer.setSize(w, h, false)
     camera.aspect = w / h
-    const t = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))
-    const dist = Math.max(1.8 / (t * camera.aspect), 1.3 / t)
-    const elev = THREE.MathUtils.degToRad(isSmall ? 34 : 30)
-    camera.position.set(0, Math.sin(elev) * dist + target.y, Math.cos(elev) * dist)
+
+    const rig = computeCameraRig({
+      aspect: camera.aspect,
+      fovDeg: camera.fov,
+      modelRadius: modelMetrics.radius,
+      modelHeight: modelMetrics.height,
+      isSmall,
+    })
+
+    target.set(0, rig.targetY, 0)
+    camera.position.set(0, rig.cameraY, rig.cameraZ)
     camera.lookAt(target)
     camera.updateProjectionMatrix()
-    if (reducedMotion) render()
+    if (reducedMotion && dish) render()
   }
   const ro = new ResizeObserver(fit)
   ro.observe(container)
@@ -130,7 +148,7 @@ export function createDishScene(container, { reducedMotion = false, onStatus = (
 
   // ---------- interaction ----------
   const tilt = { x: 0, z: 0, tx: 0, tz: 0 }
-  const spinVel = reducedMotion ? 0 : 0.14 // рад/с
+  const spinVel = reducedMotion ? 0 : 0.13 // рад/с
   let dragVel = 0
   let dragging = false
   let lastX = 0
@@ -139,8 +157,8 @@ export function createDishScene(container, { reducedMotion = false, onStatus = (
     if (e.pointerType === 'mouse') {
       const nx = (e.clientX / window.innerWidth) * 2 - 1
       const ny = (e.clientY / window.innerHeight) * 2 - 1
-      tilt.tx = ny * 0.16
-      tilt.tz = -nx * 0.1
+      tilt.tx = ny * 0.14
+      tilt.tz = -nx * 0.09
     }
     if (dragging) {
       const dx = e.clientX - lastX
@@ -148,7 +166,7 @@ export function createDishScene(container, { reducedMotion = false, onStatus = (
       dragVel = dx * 0.012
       spin.rotation.y += dx * 0.008
     }
-    if (reducedMotion) requestRender()
+    if (reducedMotion && dish) requestRender()
   }
   function onPointerDown(e) {
     dragging = true
@@ -165,6 +183,7 @@ export function createDishScene(container, { reducedMotion = false, onStatus = (
   // ---------- loop ----------
   const timer = new THREE.Timer()
   let raf = 0
+  let timeoutId = 0
   let visible = true
   let disposed = false
   let intro = reducedMotion ? 1 : 0
@@ -172,11 +191,36 @@ export function createDishScene(container, { reducedMotion = false, onStatus = (
   function render() {
     renderer.render(scene, camera)
   }
+
+  function afterDraw(cb) {
+    const gl = renderer.getContext()
+    if (gl && typeof gl.fenceSync === 'function') {
+      const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0)
+      gl.flush()
+      const poll = () => {
+        if (disposed) {
+          if (sync) gl.deleteSync(sync)
+          return
+        }
+        const state = sync && gl.getSyncParameter(sync, gl.SYNC_STATUS)
+        if (state === gl.UNSIGNALED) {
+          timeoutId = window.setTimeout(poll, 5)
+        } else {
+          if (sync) gl.deleteSync(sync)
+          timeoutId = window.setTimeout(cb, 80)
+        }
+      }
+      timeoutId = window.setTimeout(poll, 5)
+      return
+    }
+    timeoutId = window.setTimeout(cb, 80)
+  }
+
   let pendingRender = false
   function requestRender() {
     if (pendingRender) return
     pendingRender = true
-    requestAnimationFrame(() => {
+    raf = requestAnimationFrame(() => {
       pendingRender = false
       if (disposed) return
       tilt.x = tilt.tx
@@ -189,20 +233,23 @@ export function createDishScene(container, { reducedMotion = false, onStatus = (
 
   function frame(now) {
     raf = 0
+    timeoutId = 0
     if (disposed || !visible) return
     timer.update(now)
     const dt = Math.min(timer.getDelta(), 0.05)
     const t = timer.getElapsed()
 
     if (intro < 1) {
-      intro = Math.min(1, intro + dt / 1.6)
+      intro = Math.min(1, intro + dt / 1.3)
       const e = 1 - Math.pow(1 - intro, 3)
-      root.position.y = (1 - e) * -0.35
-      root.scale.setScalar(0.9 + 0.1 * e)
+      root.position.y = (isSmall ? 0 : 0.16) + (1 - e) * -0.28
+      root.scale.setScalar(0.92 + 0.08 * e)
+    } else {
+      root.position.y = isSmall ? 0 : 0.16
     }
 
-    tilt.x += (tilt.tx - tilt.x) * Math.min(1, dt * 3)
-    tilt.z += (tilt.tz - tilt.z) * Math.min(1, dt * 3)
+    tilt.x += (tilt.tx - tilt.x) * Math.min(1, dt * 3.2)
+    tilt.z += (tilt.tz - tilt.z) * Math.min(1, dt * 3.2)
     root.rotation.x = tilt.x
     root.rotation.z = tilt.z
 
@@ -211,23 +258,32 @@ export function createDishScene(container, { reducedMotion = false, onStatus = (
       spin.rotation.y += (spinVel + dragVel) * dt
     }
 
-    ember.intensity = 3.5 + Math.sin(t * 2.3) * 0.45 + Math.sin(t * 5.7) * 0.25
+    ember.intensity = 3.4 + Math.sin(t * 2.3) * 0.4 + Math.sin(t * 5.7) * 0.22
     if (embers) embers.update(dt)
 
     render()
-    raf = requestAnimationFrame(frame)
+    if (isSoftwareGl) {
+      afterDraw(() => frame(performance.now()))
+    } else {
+      raf = requestAnimationFrame(frame)
+    }
   }
 
   function start() {
+    if (!dish || disposed) return
     if (reducedMotion) {
       root.position.y = 0
       root.scale.setScalar(1)
       render()
       return
     }
-    if (!raf && !disposed) {
-      timer.update() // сбрасываем дельту после паузы
-      raf = requestAnimationFrame(frame)
+    if (!raf && !timeoutId) {
+      timer.update()
+      if (isSoftwareGl) {
+        frame(performance.now())
+      } else {
+        raf = requestAnimationFrame(frame)
+      }
     }
   }
 
@@ -245,29 +301,65 @@ export function createDishScene(container, { reducedMotion = false, onStatus = (
   }
   document.addEventListener('visibilitychange', onVisibility)
 
-  start()
-  onStatus({ ready: true, source: 'procedural' })
-
-  // ---------- optional user model ----------
-  loadUserModel()
-    .then((model) => {
-      if (!model || disposed) return
+  function mountDish(nextDish, metrics, source, initialYaw = 0) {
+    if (disposed) {
+      disposeObject(nextDish)
+      return
+    }
+    if (dish) {
       spin.remove(dish)
       disposeObject(dish)
-      dish = model
-      spin.add(dish)
-      if (reducedMotion) render()
-      onStatus({ ready: true, source: 'model' })
+    }
+    dish = nextDish
+    modelMetrics.radius = metrics.radius
+    modelMetrics.height = metrics.height
+    spin.rotation.y = initialYaw
+    spin.add(dish)
+    fit()
+    if (!isSoftwareGl) {
+      renderer.compile(scene, camera)
+    }
+    start()
+    onStatus({ ready: true, source })
+  }
+
+  function mountProceduralFallback() {
+    const proc = buildProceduralDish({
+      quality: isSmall ? 'medium' : 'high',
+      anisotropy: Math.min(8, renderer.capabilities.getMaxAnisotropy()),
     })
-    .catch((err) => {
-      // Модель есть, но не читается — оставляем процедурное блюдо.
-      console.info('[Ember & Olive] Модель блюда не загружена, показана заглушка:', err?.message || err)
-    })
+    mountDish(proc, { radius: 1.65, height: 0.55 }, 'procedural', 0)
+  }
+
+  // ---------- load model or fallback ----------
+  if (dishModel.available) {
+    loadUserModel(renderer)
+      .then((loaded) => {
+        if (disposed) return
+        if (!loaded) {
+          mountProceduralFallback()
+          return
+        }
+        mountDish(
+          loaded.model,
+          { radius: loaded.radius, height: loaded.height },
+          'model',
+          loaded.initialYaw,
+        )
+      })
+      .catch((err) => {
+        console.info('[Ember & Olive] Модель блюда не загружена, показана заглушка:', err?.message || err)
+        mountProceduralFallback()
+      })
+  } else {
+    mountProceduralFallback()
+  }
 
   // ---------- cleanup ----------
   return function dispose() {
     disposed = true
     if (raf) cancelAnimationFrame(raf)
+    if (timeoutId) clearTimeout(timeoutId)
     ro.disconnect()
     io.disconnect()
     document.removeEventListener('visibilitychange', onVisibility)
@@ -284,49 +376,108 @@ export function createDishScene(container, { reducedMotion = false, onStatus = (
 }
 
 // =====================================================================
-// Загрузка пользовательской модели
+// Загрузка 3D-модели (.glb)
 // =====================================================================
-async function loadUserModel() {
+async function loadUserModel(renderer) {
   if (!dishModel.available) return null
-  const res = await fetch(dishModel.url, { cache: 'no-cache' })
+  const res = await fetch(dishModel.url, { cache: 'default' })
   if (!res.ok) return null
   const buf = await res.arrayBuffer()
   if (buf.byteLength < 12) return null
   const magic = String.fromCharCode(...new Uint8Array(buf, 0, 4))
   if (magic !== 'glTF') return null
 
-  const [{ GLTFLoader }, { DRACOLoader }, { MeshoptDecoder }] = await Promise.all([
-    import('three/examples/jsm/loaders/GLTFLoader.js'),
-    import('three/examples/jsm/loaders/DRACOLoader.js'),
-    import('three/examples/jsm/libs/meshopt_decoder.module.js'),
-  ])
+  const { GLTFLoader } = await import('three/examples/jsm/loaders/GLTFLoader.js')
   const loader = new GLTFLoader()
-  const draco = new DRACOLoader() // декодер Vite кладёт в сборку сам (через import.meta.url)
-  loader.setDRACOLoader(draco)
-  loader.setMeshoptDecoder(MeshoptDecoder)
 
   const gltf = await loader.parseAsync(buf, '/models/')
-  draco.dispose()
   const model = gltf.scene
 
-  // Нормализация: диаметр ≈ 3.3 единицы, центр в нуле, дно на полу.
-  const box = new THREE.Box3().setFromObject(model)
-  const size = box.getSize(new THREE.Vector3())
-  const span = Math.max(size.x, size.z) || 1
-  model.scale.setScalar(3.3 / span)
-  box.setFromObject(model)
-  const center = box.getCenter(new THREE.Vector3())
-  model.position.x -= center.x
-  model.position.z -= center.z
-  model.position.y -= box.min.y
+  // Убираем встроенную камеру из сцены модели, если есть
+  const toRemove = []
+  model.traverse((o) => {
+    if (o.isCamera) toRemove.push(o)
+  })
+  toRemove.forEach((c) => c.parent?.remove(c))
+
+  model.updateMatrixWorld(true)
+  const rawBox = new THREE.Box3().setFromObject(model)
+  const norm = computeModelNormalization(rawBox, { targetSpan: 3.3, maxHeight: 2.35 })
+
+  model.scale.setScalar(norm.scale)
+  model.position.set(norm.offsetX, norm.offsetY, norm.offsetZ)
+
+  const maxAniso = isSoftwareGl ? 1 : Math.min(8, renderer.capabilities.getMaxAnisotropy())
 
   model.traverse((o) => {
-    if (o.isMesh) {
-      o.castShadow = true
-      o.receiveShadow = true
+    if (!o.isMesh) return
+    const mats = Array.isArray(o.material) ? o.material : [o.material]
+    let isGlass = false
+
+    mats.forEach((mat) => {
+      if (!mat) return
+      const name = (mat.name || '').toLowerCase()
+      const hasTransmission = typeof mat.transmission === 'number' && mat.transmission > 0
+      if (hasTransmission || name.includes('glass')) {
+        isGlass = true
+      }
+
+      if (mat.map) mat.map.anisotropy = maxAniso
+      if (mat.normalMap) mat.normalMap.anisotropy = maxAniso
+      if (mat.roughnessMap) mat.roughnessMap.anisotropy = maxAniso
+
+      if (name.includes('gold')) {
+        mat.envMapIntensity = 2.2
+        mat.roughness = Math.min(mat.roughness ?? 0.35, 0.32)
+      } else if (name.includes('olive')) {
+        mat.envMapIntensity = 1.25
+        if (typeof mat.roughness === 'number') {
+          mat.roughness = Math.min(mat.roughness, 0.28)
+        }
+      } else if (isGlass) {
+        mat.envMapIntensity = 2.1
+      }
+
+      // На программном WebGL заменяем многопроходную трансмиссию
+      // на глубокое дымчато-иридесцентное стекло с чистыми бликами.
+      if (isSoftwareGl && hasTransmission) {
+        mat.transmission = 0
+        mat.transparent = true
+        if (name.includes('dish')) {
+          mat.color.setHex(0x2d2213)
+          mat.opacity = 0.16
+          mat.roughness = 0.05
+          mat.envMapIntensity = 2.3
+        } else {
+          mat.color.setHex(0x13221a)
+          mat.opacity = 0.26
+          mat.roughness = 0.06
+          mat.clearcoat = 1.0
+          mat.clearcoatRoughness = 0.04
+          mat.iridescence = 1.0
+          mat.iridescenceIOR = 1.48
+          mat.envMapIntensity = 2.8
+        }
+        mat.depthWrite = false
+        mat.needsUpdate = true
+      }
+    })
+
+    // Стеклянный клош не должен отбрасывать сплошную чёрную тень на оливки
+    o.castShadow = !isSoftwareGl && !isGlass
+    o.receiveShadow = !isSoftwareGl
+    if (isGlass) {
+      o.renderOrder = o.name.toLowerCase().includes('cover') ? 3 : 2
     }
   })
-  return model
+
+  return {
+    model,
+    radius: norm.radius,
+    height: norm.normalizedHeight,
+    // Поворачиваем открытой стороной клоша к зрителю, чтобы сразу видеть оливки
+    initialYaw: -1.45,
+  }
 }
 
 function buildEmbers(count) {
@@ -376,22 +527,25 @@ function buildEmbers(count) {
 // helpers
 // =====================================================================
 
-/** Окружение для отражений: тёмный зал, тёплый софтбокс сверху, окно, оливковый контровой, подвесные лампы. */
+/** Окружение для отражений: тёплый золотой купол, студийные софтбоксы, оливковый контровой и огни очага. */
 function buildRestaurantEnv() {
   const env = new THREE.Scene()
   const room = new THREE.Mesh(
     new THREE.BoxGeometry(24, 12, 24),
-    new THREE.MeshBasicMaterial({ color: 0x24170f, side: THREE.BackSide }),
+    new THREE.MeshBasicMaterial({ color: 0x3b2718, side: THREE.BackSide }),
   )
   room.position.y = 5
   env.add(room)
 
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(24, 24), new THREE.MeshBasicMaterial({ color: 0x3b2618 }))
+  const floor = new THREE.Mesh(
+    new THREE.PlaneGeometry(24, 24),
+    new THREE.MeshBasicMaterial({ color: 0x523620 }),
+  )
   floor.rotation.x = -Math.PI / 2
   floor.position.y = -0.8
   env.add(floor)
 
-  const origin = new THREE.Vector3(0, 0, 0)
+  const origin = new THREE.Vector3(0, 0.5, 0)
   const panel = (w, h, color, intensity, x, y, z) => {
     const mat = new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide })
     mat.color.multiplyScalar(intensity)
@@ -400,19 +554,21 @@ function buildRestaurantEnv() {
     m.lookAt(origin)
     env.add(m)
   }
-  panel(7, 5, 0xffe6cc, 6, 4, 9, 5) // основной софтбокс
-  panel(10, 4, 0xfff0dc, 2.2, -11, 4, 0.5) // окно
-  panel(5, 3, 0xd6dba6, 2.6, -6, 4, -9) // контровой
-  panel(4, 2, 0xff9a55, 1.6, 8, 1.5, -2) // отсвет очага
+  panel(12, 7.5, 0xffeed8, 6.2, 4.5, 9, 5.5) // широкий верхний софтбокс для сусального золота
+  panel(12, 5.5, 0xfff3e2, 3.6, -10, 5.0, 2.5) // боковой тёплый свет
+  panel(8, 4.5, 0xd9e4a8, 3.8, -5.5, 4.5, -8.5) // оливковый контровой для стекла
+  panel(7, 3.5, 0xffa65c, 3.2, 8.5, 2.8, -2.5) // тёплый янтарный отсвет очага
+  panel(11, 5.5, 0xfff6ea, 3.4, 0, 10.5, -1) // верхняя подсветка купола клоша
+  panel(9, 4.0, 0xf2cf94, 2.6, 2, 3.2, 9.5) // фронтальное золотистое отражение
 
-  const bulbGeo = new THREE.SphereGeometry(0.35, 16, 12)
+  const bulbGeo = new THREE.SphereGeometry(0.4, 16, 12)
   ;[
     [-3, 8, -2],
     [2.5, 8.5, -4],
-    [0, 7.5, 3.5],
+    [0.5, 7.8, 3.8],
   ].forEach(([x, y, z]) => {
-    const mat = new THREE.MeshBasicMaterial({ color: 0xffb070 })
-    mat.color.multiplyScalar(40)
+    const mat = new THREE.MeshBasicMaterial({ color: 0xffc080 })
+    mat.color.multiplyScalar(32)
     const b = new THREE.Mesh(bulbGeo, mat)
     b.position.set(x, y, z)
     env.add(b)
